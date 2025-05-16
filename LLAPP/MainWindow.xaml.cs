@@ -1,95 +1,141 @@
-﻿using Microsoft.Win32;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media.Imaging;
+using Microsoft.Win32;
 
-namespace LLAPP
+namespace LeerlingTool
 {
     public partial class MainWindow : Window
     {
-        private Dictionary<string, string> leerlingen = new();
+        private Dictionary<string, string> leerlingen = new Dictionary<string, string>();
 
         public MainWindow()
         {
             InitializeComponent();
-            LaadLeerlingen();
+            LoadLeerlingen();
+            SearchPlaceholder.Visibility = Visibility.Visible;
         }
 
-        private void LaadLeerlingen()
+        private void LoadLeerlingen()
         {
-            if (File.Exists("leerlingen.json"))
+            try
             {
-                string json = File.ReadAllText("leerlingen.json");
-                leerlingen = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
-            }
-        }
-
-        private void OpslaanLeerlingen()
-        {
-            string json = JsonSerializer.Serialize(leerlingen, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText("leerlingen.json", json);
-        }
-
-        private void ZoekButton_Click(object sender, RoutedEventArgs e)
-        {
-            string naam = SearchBox.Text.Trim();
-
-            if (leerlingen.ContainsKey(naam))
-            {
-                string fotoPad = leerlingen[naam];
-                if (File.Exists(fotoPad))
+                string jsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "leerlingen.json");
+                if (File.Exists(jsonPath))
                 {
-                    BitmapImage image = new();
-                    image.BeginInit();
-                    image.UriSource = new Uri(Path.GetFullPath(fotoPad));
-                    image.CacheOption = BitmapCacheOption.OnLoad;
-                    image.EndInit();
+                    string jsonText = File.ReadAllText(jsonPath);
+                    leerlingen = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonText);
 
-                    LeerlingFoto.Source = image;
+                    UpdateNamenLijst();
                 }
                 else
                 {
-                    MessageBox.Show("Foto niet gevonden.");
+                    File.WriteAllText(jsonPath, "{}");
                 }
             }
-            else
+            catch (Exception ex)
             {
-                MessageBox.Show("Leerling niet gevonden.");
+                MessageBox.Show("Fout bij laden leerlingen: " + ex.Message);
             }
         }
 
-        private void ToevoegenButton_Click(object sender, RoutedEventArgs e)
+        private void UpdateNamenLijst()
         {
-            string naam = Microsoft.VisualBasic.Interaction.InputBox("Vul de naam van de leerling in:", "Leerling Toevoegen");
+            NamenLijst.ItemsSource = null;
+            NamenLijst.ItemsSource = new List<string>(leerlingen.Keys);
+        }
 
-            if (string.IsNullOrWhiteSpace(naam))
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            string zoekterm = SearchBox.Text.Trim();
+            if (leerlingen.ContainsKey(zoekterm))
             {
-                MessageBox.Show("Geen naam ingevuld.");
+                ToonFoto(zoekterm);
+                NamenLijst.SelectedItem = zoekterm;
+            }
+            else
+            {
+                MessageBox.Show("Leerling niet gevonden.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private void NamenLijst_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (NamenLijst.SelectedItem != null)
+            {
+                string naam = NamenLijst.SelectedItem.ToString();
+                SearchBox.Text = naam;
+                ToonFoto(naam);
+            }
+        }
+
+        private void ToonFoto(string naam)
+        {
+            if (leerlingen.TryGetValue(naam, out string bestandsnaam))
+            {
+                string fotoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Fotos", bestandsnaam);
+                if (File.Exists(fotoPath))
+                {
+                    LeerlingFoto.Source = new BitmapImage(new Uri(fotoPath));
+                    NaamLabel.Text = naam;
+                }
+                else
+                {
+                    LeerlingFoto.Source = null;
+                    NaamLabel.Text = "Foto niet gevonden";
+                }
+            }
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            SearchPlaceholder.Visibility = string.IsNullOrEmpty(SearchBox.Text)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private void AddButton_Click(object sender, RoutedEventArgs e)
+        {
+            string naam = NieuwNaamBox.Text.Trim();
+            if (string.IsNullOrEmpty(naam))
+            {
+                MessageBox.Show("Vul een naam in.", "Fout", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            OpenFileDialog openFileDialog = new();
-            openFileDialog.Filter = "Afbeeldingen (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg";
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.Filter = "Afbeeldingen (*.png;*.jpg)|*.png;*.jpg";
             if (openFileDialog.ShowDialog() == true)
             {
-                string fotosMap = "Fotos";
-                if (!Directory.Exists(fotosMap))
+                string fotosDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Fotos");
+                if (!Directory.Exists(fotosDir))
+                    Directory.CreateDirectory(fotosDir);
+
+                string bestandsnaam = Path.GetFileName(openFileDialog.FileName);
+                string doelPad = Path.Combine(fotosDir, bestandsnaam);
+
+                try
                 {
-                    Directory.CreateDirectory(fotosMap);
+                    File.Copy(openFileDialog.FileName, doelPad, true);
+                    leerlingen[naam] = bestandsnaam;
+
+                    string jsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "leerlingen.json");
+                    string jsonText = JsonSerializer.Serialize(leerlingen, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(jsonPath, jsonText);
+
+                    UpdateNamenLijst();
+                    NieuwNaamBox.Text = "";
+
+                    MessageBox.Show("Leerling toegevoegd!", "Succes", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
-
-                string bestandsNaam = Path.GetFileName(openFileDialog.FileName);
-                string doelPad = Path.Combine(fotosMap, bestandsNaam);
-
-                File.Copy(openFileDialog.FileName, doelPad, true);
-
-                leerlingen[naam] = doelPad;
-                OpslaanLeerlingen();
-
-                MessageBox.Show("Leerling toegevoegd!");
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Fout bij toevoegen: " + ex.Message);
+                }
             }
         }
     }
